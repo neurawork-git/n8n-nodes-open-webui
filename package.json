@@ -64,5 +64,10 @@
     "prettier": "3.8.3",
     "ts-jest": "^29.4.15",
     "typescript": "5.9.3"
+  },
+  "overrides": {
+    "@langchain/community": {
+      "ignore": "5.3.2"
+    }
   }
 }
