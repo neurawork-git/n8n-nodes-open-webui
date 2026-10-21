@@ -1,0 +1,272 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # publish.yml ruft diesen Workflow vor dem Publish auf (needs) — ohne grünen
+  # n8n-Lade- und Ausführungsnachweis geht nichts nach npm.
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      e2e:
+        description: 'E2E gegen einen Open-WebUI-Container ausführen (braucht ACR_USERNAME/ACR_PASSWORD)'
+        type: boolean
+        default: false
+      owui_image:
+        description: 'Open-WebUI-Image für E2E'
+        required: false
+        default: 'neuraworkacr.azurecr.io/open-webui:0.11.4-nw.2'
+
+env:
+  # Zielversion. n8n-workflow in den devDependencies ist auf die Version gepinnt,
+  # die genau dieses n8n mitbringt (npm view n8n@2.44.4 dependencies.n8n-workflow).
+  N8N_IMAGE: n8nio/n8n:2.44.4
+
+jobs:
+  test:
+    name: lint, build, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test -- --ci
+      - name: Paket packen
+        run: |
+          npm pack
+          tar -tzf n8n-nodes-open-webui-*.tgz | sort > pack-contents.txt
+          cat pack-contents.txt
+          # Nur dist/ gehört ins Paket — keine Tests, keine Quellen.
+          if grep -vE '^package/(dist/|package\.json$|README\.md$|LICENSE$|CHANGELOG\.md$)' pack-contents.txt; then
+            echo "::error::Unerwartete Dateien im Paket (siehe oben)"; exit 1
+          fi
+          for f in dist/nodes/OpenWebUi/openWebUi.svg dist/nodes/OpenWebUi/OpenWebUi.node.js \
+                   dist/nodes/OpenWebUi/OpenWebUiRead.node.js dist/nodes/OpenWebUi/OpenWebUiWrite.node.js \
+                   dist/credentials/OpenWebUiApi.credentials.js; do
+            grep -qx "package/$f" pack-contents.txt || { echo "::error::$f fehlt im Paket"; exit 1; }
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: n8n-nodes-open-webui-*.tgz
+          retention-days: 7
+
+  # Lädt das gepackte Tarball wie eine über die Oberfläche installierte
+  # Community-Node in n8n 2.44.4 und prüft, welche Node-Typen registriert sind.
+  # Matrix: einmal ohne, einmal mit N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true.
+  # Mit der Env MÜSSEN openWebUiReadTool und openWebUiWriteTool entstehen (sonst
+  # rot); ohne Env wird nur gewarnt. Das Job-Summary zeigt, ob der Rollout die
+  # Env braucht.
+  n8n-load:
+    name: n8n 2.44.4 lädt das Paket (Tool-Env ${{ matrix.allow_tool_usage }})
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        allow_tool_usage: ['false', 'true']
+    env:
+      ALLOW_TOOL_USAGE: ${{ matrix.allow_tool_usage }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package
+      - name: n8n mit dem Paket starten
+        run: |
+          TGZ="$(ls n8n-nodes-open-webui-*.tgz)"
+          EXTRA_ENV=""
+          if [ "$ALLOW_TOOL_USAGE" = "true" ]; then
+            EXTRA_ENV="-e N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true"
+          fi
+          docker run -d --name n8n -p 5678:5678 \
+            -e N8N_ENCRYPTION_KEY=ci-load-key \
+            -e N8N_DIAGNOSTICS_ENABLED=false \
+            -e N8N_LOG_LEVEL=debug \
+            $EXTRA_ENV \
+            -v "$PWD/$TGZ":/tmp/pkg.tgz:ro \
+            --entrypoint sh "$N8N_IMAGE" -c '
+              set -e
+              d=/home/node/.n8n/nodes/node_modules/n8n-nodes-open-webui
+              mkdir -p "$d"
+              tar -xzf /tmp/pkg.tgz -C "$d" --strip-components=1
+              exec n8n start'
+          for i in $(seq 1 90); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5678/healthz/readiness || true)"
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          if [ "$code" != "200" ]; then docker logs n8n; echo "n8n wurde nicht bereit"; exit 1; fi
+
+      - name: Registrierte Node-Typen prüfen
+        run: |
+          docker logs n8n > n8n.log 2>&1 || true
+          FILE=/home/node/.cache/n8n/public/types/nodes.json
+          if ! docker exec n8n test -f "$FILE"; then
+            echo "::error::$FILE fehlt. Gefundene nodes.json:"
+            docker exec n8n sh -c 'find /home/node -name nodes.json 2>/dev/null' || true
+            exit 1
+          fi
+          docker exec n8n cat "$FILE" > types.json
+          jq -r '.[].name' types.json | grep -i 'open-webui' | sort > registered.txt || true
+          echo "Registriert:"; cat registered.txt
+
+          has() { grep -qx "n8n-nodes-open-webui.$1" registered.txt; }
+          {
+            echo "### n8n 2.44.4 — N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=$ALLOW_TOOL_USAGE"
+            echo ""
+            echo "| Typ | registriert |"
+            echo "|---|---|"
+            for t in openWebUi openWebUiRead openWebUiWrite openWebUiReadTool openWebUiWriteTool openWebUiTool; do
+              if has "$t"; then echo "| \`$t\` | ja |"; else echo "| \`$t\` | nein |"; fi
+            done
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          fail=0
+          for t in openWebUi openWebUiRead openWebUiWrite; do
+            has "$t" || { echo "::error::Node-Typ $t nicht registriert"; fail=1; }
+          done
+          if grep -E 'Skipping package|Failed to load package|failed to load' n8n.log | grep -i 'open-webui'; then
+            echo "::error::Ladefehler im Startlog"; fail=1
+          fi
+          if has openWebUiTool; then
+            echo "::error::openWebUiTool existiert — die Workflow-Node darf kein Werkzeug sein"; fail=1
+          fi
+          if has openWebUiReadTool && has openWebUiWriteTool; then
+            echo "Tool-Varianten erzeugt (Env: $ALLOW_TOOL_USAGE)." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$ALLOW_TOOL_USAGE" = "true" ]; then
+            echo "::error::Tool-Varianten fehlen trotz N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true"; fail=1
+            echo "**Tool-Varianten fehlen auch mit Env** — Paket wird nicht als KI-Tool angeboten." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::Tool-Varianten fehlen ohne Env — der Rollout braucht N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true."
+            echo "**Tool-Varianten fehlen ohne Env** — Rollout braucht N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit $fail
+
+      - name: Startlog
+        if: always()
+        run: docker logs n8n 2>&1 | tail -200 || true
+
+  # Führt die echte Node in n8n 2.44.4 aus — über die Brücke GenericFunctions →
+  # httpRequestWithAuthentication, die Unit- und E2E-Tests umgehen. Gegen einen
+  # Open-WebUI-Stub (test/n8n/owui-stub.mjs): Download (Binär), Upload
+  # (multipart-Buffer), Chat mit 400 (Status-Durchreichung, continueOnFail) und
+  # Bearer-Anmeldung aus der Credential. Auswertung: test/n8n/check-run.mjs.
+  n8n-execute:
+    name: n8n 2.44.4 führt die Node aus
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: pkg
+      - name: Open-WebUI-Stub starten
+        run: |
+          nohup node test/n8n/owui-stub.mjs 8099 "$PWD/stub-requests.json" > stub.log 2>&1 &
+          for i in $(seq 1 20); do curl -fs localhost:8099/__health && break; sleep 1; done
+      - name: Credential und Workflow importieren, Workflow ausführen
+        run: |
+          TGZ="$(ls pkg/n8n-nodes-open-webui-*.tgz)"
+          set +e
+          docker run --rm --name n8n-exec --network host \
+            -e N8N_ENCRYPTION_KEY=ci-exec-key \
+            -e N8N_DIAGNOSTICS_ENABLED=false \
+            -e N8N_LOG_LEVEL=warn \
+            -v "$PWD/$TGZ":/tmp/pkg.tgz:ro \
+            -v "$PWD/test/n8n":/ci:ro \
+            --entrypoint sh "$N8N_IMAGE" -c '
+              set -e
+              d=/home/node/.n8n/nodes/node_modules/n8n-nodes-open-webui
+              mkdir -p "$d"
+              tar -xzf /tmp/pkg.tgz -C "$d" --strip-components=1
+              n8n import:credentials --input=/ci/credentials.json >&2
+              n8n import:workflow --input=/ci/workflow.json >&2
+              n8n execute --id=owuiCiWorkflow --rawOutput' > run-output.txt 2> run-stderr.txt
+          code=$?
+          set -e
+          cat run-stderr.txt
+          if [ "$code" != "0" ]; then
+            cat run-output.txt
+            echo "::error::n8n execute endete mit $code"; exit 1
+          fi
+      - name: Ergebnis prüfen
+        run: node test/n8n/check-run.mjs run-output.txt stub-requests.json
+      - name: Stub-Log
+        if: always()
+        run: cat stub.log stub-requests.json 2>/dev/null || true
+
+  # Opt-in: echter Open-WebUI-Container plus OpenAI-Stub. Braucht Pull-Rechte
+  # auf neuraworkacr (Repo-Secrets ACR_USERNAME/ACR_PASSWORD).
+  e2e-owui:
+    name: E2E gegen Open WebUI
+    needs: test
+    if: github.event_name == 'workflow_dispatch' && inputs.e2e
+    runs-on: ubuntu-latest
+    env:
+      OWUI_IMAGE: ${{ inputs.owui_image }}
+      OWUI_E2E_BASE_URL: http://localhost:8080
+      OWUI_E2E_MODEL: stub-model
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: OpenAI-Stub starten
+        run: |
+          nohup node test/e2e/openai-stub.mjs 9999 > stub.log 2>&1 &
+          for i in $(seq 1 20); do curl -fs localhost:9999/v1/models && break; sleep 1; done
+      - uses: azure/docker-login@v2
+        with:
+          login-server: neuraworkacr.azurecr.io
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+      - name: Open WebUI starten
+        run: |
+          docker run -d --name owui --network host \
+            -e PORT=8080 \
+            -e WEBUI_SECRET_KEY=ci-e2e \
+            -e ENABLE_API_KEYS=true \
+            -e ENABLE_OLLAMA_API=false \
+            -e OPENAI_API_BASE_URL=http://localhost:9999/v1 \
+            -e OPENAI_API_KEY=stub \
+            -e RAG_EMBEDDING_ENGINE=openai \
+            -e RAG_EMBEDDING_MODEL=stub-embedding \
+            -e RAG_OPENAI_API_BASE_URL=http://localhost:9999/v1 \
+            -e RAG_OPENAI_API_KEY=stub \
+            -e AUDIO_STT_ENGINE=openai \
+            -e OFFLINE_MODE=true \
+            "$OWUI_IMAGE"
+          for i in $(seq 1 120); do
+            curl -fs localhost:8080/health && break
+            sleep 3
+          done
+          curl -fs localhost:8080/api/version || { docker logs owui | tail -200; exit 1; }
+      - name: Admin und API-Key anlegen
+        run: |
+          TOKEN="$(curl -fsS -X POST localhost:8080/api/v1/auths/signup \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"CI","email":"ci@example.test","password":"ci-e2e-password"}' | jq -r .token)"
+          KEY="$(curl -fsS -X POST localhost:8080/api/v1/auths/api_key \
+            -H "Authorization: Bearer $TOKEN" | jq -r .api_key)"
+          test -n "$KEY" && test "$KEY" != null
+          echo "::add-mask::$KEY"
+          echo "OWUI_E2E_API_KEY=$KEY" >> "$GITHUB_ENV"
+      - run: npm run test:e2e -- --ci
+      - name: Logs
+        if: always()
+        run: |
+          docker logs owui 2>&1 | tail -300 || true
+          cat stub.log || true

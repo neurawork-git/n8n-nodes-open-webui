@@ -1,0 +1,48 @@
+name: Publish
+
+# Veröffentlicht nach npm — ausschließlich über einen Tag v<version>.
+#
+# Voraussetzungen (siehe README, Abschnitt „Release“):
+#   - Repo ist öffentlich. npm erzeugt Provenance nicht für private Repos.
+#   - Repo-Secret NPM_TOKEN (Granular Token, nur dieses Paket). Geführt in
+#     Infisical, Projekt thecluster. Nach dem ersten Publish kann auf Trusted
+#     Publishing (OIDC) umgestellt und der Token entfernt werden.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Die volle CI für genau diesen Tag-Commit: lint, build, Jest, n8n lädt das
+  # Paket (mit und ohne Tool-Env) und n8n führt die Node aus. Erst danach Publish.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+      # Provenance über Trusted Publishing braucht npm >= 11.5.1.
+      - run: npm install -g npm@^11.5.1
+      - name: Tag gleich package.json-Version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} passt nicht zu package.json ${VERSION}"; exit 1
+          fi
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test -- --ci
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,71 @@
+{
+	"id": "owuiCiWorkflow",
+	"name": "Open WebUI CI",
+	"active": false,
+	"settings": {},
+	"nodes": [
+		{
+			"id": "0b6c5a52-1f0e-4a39-9a0e-000000000001",
+			"name": "Start",
+			"type": "n8n-nodes-base.manualTrigger",
+			"typeVersion": 1,
+			"position": [0, 0],
+			"parameters": {}
+		},
+		{
+			"id": "0b6c5a52-1f0e-4a39-9a0e-000000000002",
+			"name": "Download",
+			"type": "n8n-nodes-open-webui.openWebUi",
+			"typeVersion": 1,
+			"position": [220, 0],
+			"parameters": {
+				"resource": "file",
+				"operation": "download",
+				"fileId": { "__rl": true, "mode": "id", "value": "src" },
+				"binaryPropertyName": "data"
+			},
+			"credentials": { "openWebUiApi": { "id": "owuiCiCredential", "name": "Open WebUI CI" } }
+		},
+		{
+			"id": "0b6c5a52-1f0e-4a39-9a0e-000000000003",
+			"name": "Upload",
+			"type": "n8n-nodes-open-webui.openWebUi",
+			"typeVersion": 1,
+			"position": [440, 0],
+			"parameters": {
+				"resource": "file",
+				"operation": "upload",
+				"binaryPropertyName": "data",
+				"fileName": "",
+				"uploadKnowledgeBaseId": "",
+				"waitForProcessing": false
+			},
+			"credentials": { "openWebUiApi": { "id": "owuiCiCredential", "name": "Open WebUI CI" } }
+		},
+		{
+			"id": "0b6c5a52-1f0e-4a39-9a0e-000000000004",
+			"name": "Chat",
+			"type": "n8n-nodes-open-webui.openWebUi",
+			"typeVersion": 1,
+			"position": [660, 0],
+			"onError": "continueRegularOutput",
+			"parameters": {
+				"resource": "chat",
+				"operation": "complete",
+				"model": { "__rl": true, "mode": "id", "value": "stub-model" },
+				"inputMode": "prompt",
+				"prompt": "Hallo",
+				"systemPrompt": "",
+				"knowledgeBaseIds": [],
+				"fileIds": "",
+				"chatOptions": {}
+			},
+			"credentials": { "openWebUiApi": { "id": "owuiCiCredential", "name": "Open WebUI CI" } }
+		}
+	],
+	"connections": {
+		"Start": { "main": [[{ "node": "Download", "type": "main", "index": 0 }]] },
+		"Download": { "main": [[{ "node": "Upload", "type": "main", "index": 0 }]] },
+		"Upload": { "main": [[{ "node": "Chat", "type": "main", "index": 0 }]] }
+	}
+}
