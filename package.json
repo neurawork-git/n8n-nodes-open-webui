@@ -3,17 +3,17 @@
   "version": "0.1.0",
   "description": "n8n-Baustein für Open WebUI: Chat mit Modellen und Presets, Wissensdatenbanken, Dateien und Audio — per Auswahlliste statt Hand-JSON.",
   "license": "MIT",
-  "homepage": "https://github.com/NeuraMax/n8n-nodes-open-webui",
+  "homepage": "https://github.com/neurawork-git/n8n-nodes-open-webui",
   "author": {
     "name": "Neurawork",
     "email": "maximilian.koenig@neurawork.ai"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NeuraMax/n8n-nodes-open-webui.git"
+    "url": "git+https://github.com/neurawork-git/n8n-nodes-open-webui.git"
   },
   "bugs": {
-    "url": "https://github.com/NeuraMax/n8n-nodes-open-webui/issues"
+    "url": "https://github.com/neurawork-git/n8n-nodes-open-webui/issues"
   },
   "engines": {
     "node": ">=22"

@@ -1,7 +1,7 @@
 # n8n-nodes-open-webui — Claude Code Guidelines
 
 Öffentliches n8n-Community-Paket für Open WebUI. Zweck, Operationen, Fehlerverhalten und Verzeichnisse: README.md.
-Ursprungsplan: `aie-stolley/docs/n8n-OWUI-Baustein.md`.
+Repo: `neurawork-git/n8n-nodes-open-webui` (öffentlich). Releases nur per Tag `v*` (`.github/workflows/publish.yml`).
 
 ## Harte Regeln
 
@@ -13,7 +13,7 @@ Ursprungsplan: `aie-stolley/docs/n8n-OWUI-Baustein.md`.
 3. **UI-Texte deutsch mit echten Umlauten**, Code und Bezeichner englisch. Ressourcen- und Operationsnamen bleiben
    englisch (n8n-Konvention, Werkzeugnamen); Lint erzwingt englische Pflichttexte bei dynamischen Auswahllisten
    („Names or IDs“, „Choose from the list …“) und „Whether …“ am Anfang von Boolean-Beschreibungen.
-4. **gh nur mit Account `NeuraMax`.**
+4. **gh nur mit Account `NeuraMax`** (Org `neurawork-git`), nie `Kylorin`.
 5. **Keine Laufzeit-Abhängigkeiten** (`dependencies` bleibt leer, Lint `no-runtime-dependencies`).
 
 ## Architektur

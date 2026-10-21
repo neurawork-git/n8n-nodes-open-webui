@@ -7,7 +7,7 @@
  * Fehler. Übernommen aus `n8n-nodes-neurawork/scripts/gen-sidecar.ts`.
  *
  *     npm run build
- *     npm run gen:sidecar -- ../aie-stolley/n8n
+ *     npm run gen:sidecar -- ../<workflow-repo>/n8n
  *
  * Typpräfix: Als Community-Paket über Einstellungen → Community Nodes
  * installiert, registriert n8n die Nodes unter `<paketname>.<name>`

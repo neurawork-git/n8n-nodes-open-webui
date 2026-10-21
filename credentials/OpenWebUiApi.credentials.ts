@@ -28,7 +28,7 @@ export class OpenWebUiApi implements ICredentialType {
 		dark: 'file:../nodes/OpenWebUi/openWebUi.svg',
 	};
 
-	documentationUrl = 'https://github.com/NeuraMax/n8n-nodes-open-webui#credential';
+	documentationUrl = 'https://github.com/neurawork-git/n8n-nodes-open-webui#credential';
 
 	properties: INodeProperties[] = [
 		{
