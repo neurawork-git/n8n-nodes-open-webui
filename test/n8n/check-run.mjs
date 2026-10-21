@@ -2,8 +2,11 @@
 //
 //   node test/n8n/check-run.mjs run-output.txt stub-requests.json
 //
-// run-output.txt ist die Ausgabe von `n8n execute --rawOutput`; davor können
-// Logzeilen stehen, das JSON beginnt mit der ersten Zeile, die mit `{` anfängt.
+// run-output.txt ist die Ausgabe von `n8n execute --rawOutput`. n8n schreibt das
+// Ergebnis über logger.info (N8N_LOG_LEVEL muss mindestens info sein); davor und
+// danach können Logzeilen stehen. Das Ergebnis ist mit Einrückung 2 formatiert:
+// es beginnt mit einer Zeile, die genau `{` ist, und endet mit der ersten
+// folgenden Zeile, die genau `}` ist.
 import { readFileSync } from 'node:fs';
 
 const [outputFile, stubFile] = process.argv.slice(2);
@@ -14,13 +17,14 @@ const expect = (condition, message) => {
 
 const output = readFileSync(outputFile, 'utf8');
 const lines = output.split('\n');
-const start = lines.findIndex((line) => line.startsWith('{'));
-if (start === -1) {
+const start = lines.findIndex((line) => line.trimEnd() === '{');
+const end = start === -1 ? -1 : lines.findIndex((line, i) => i > start && line.trimEnd() === '}');
+if (start === -1 || end === -1) {
 	console.error(output);
 	console.error('::error::Keine JSON-Ausgabe von n8n execute gefunden');
 	process.exit(1);
 }
-const run = JSON.parse(lines.slice(start).join('\n'));
+const run = JSON.parse(lines.slice(start, end + 1).join('\n'));
 const runData = run?.data?.resultData?.runData ?? {};
 const first = (node) => runData[node]?.[0]?.data?.main?.[0]?.[0];
 

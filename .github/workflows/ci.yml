@@ -179,10 +179,12 @@ jobs:
         run: |
           TGZ="$(ls pkg/n8n-nodes-open-webui-*.tgz)"
           set +e
+          # n8n execute gibt das Ergebnis über logger.info aus — bei
+          # N8N_LOG_LEVEL=warn bliebe stdout leer.
           docker run --rm --name n8n-exec --network host \
             -e N8N_ENCRYPTION_KEY=ci-exec-key \
             -e N8N_DIAGNOSTICS_ENABLED=false \
-            -e N8N_LOG_LEVEL=warn \
+            -e N8N_LOG_LEVEL=info \
             -v "$PWD/$TGZ":/tmp/pkg.tgz:ro \
             -v "$PWD/test/n8n":/ci:ro \
             --entrypoint sh "$N8N_IMAGE" -c '
